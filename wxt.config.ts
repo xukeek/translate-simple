@@ -1,9 +1,11 @@
 import { defineConfig } from 'wxt'
+import { resolve } from 'path'
+import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   extensionApi: 'chrome',
   manifest: {
-    name: '沉浸式翻译 - 简易版',
+    name: '简单翻译',
     permissions: ['storage'],
     action: {
       default_popup: 'entrypoints/popup/index.html',
@@ -15,4 +17,14 @@ export default defineConfig({
       },
     },
   },
+  vite: () => ({
+    plugins: [react()],
+    resolve: {
+      alias: {
+        '@': resolve(__dirname, '.'),
+        'lib': resolve(__dirname, 'lib'),
+        'components': resolve(__dirname, 'components'),
+      },
+    },
+  }),
 })

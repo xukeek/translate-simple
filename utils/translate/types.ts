@@ -13,6 +13,7 @@ export interface UserConfig {
   engine: EngineId
   targetLang: string
   displayMode: DisplayMode
+  siteList: string[]
   engines: Record<EngineId, EngineConfig>
 }
 

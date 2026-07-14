@@ -10,12 +10,18 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "preserve",
-    "types": ["wxt/client"]
+    "jsx": "react-jsx",
+    "types": ["wxt/client"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"]
+    }
   },
   "include": [
     "entrypoints/**/*",
     "utils/**/*",
+    "components/**/*",
+    "lib/**/*",
     "*.config.ts"
   ]
 }

@@ -33,12 +33,9 @@ export default defineBackground({
 
     chrome.commands.onCommand.addListener(async (command) => {
       if (command === 'toggleTranslate') {
-        const config = await getConfig()
-        await updateConfig({ enabled: !config.enabled })
-
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
         if (tab?.id) {
-          chrome.tabs.sendMessage(tab.id, { type: 'toggle' }).catch(() => {})
+          chrome.tabs.sendMessage(tab.id, { type: 'toggleTranslate' }).catch(() => {})
         }
       }
     })

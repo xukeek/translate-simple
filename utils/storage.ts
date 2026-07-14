@@ -7,6 +7,7 @@ export const DEFAULT_CONFIG: UserConfig = {
   engine: 'google',
   targetLang: 'zh-CN',
   displayMode: 'vertical',
+  siteList: [],
   engines: {
     google: {},
     siliconflow: {
@@ -22,7 +23,7 @@ export const DEFAULT_CONFIG: UserConfig = {
 
 export async function getConfig(): Promise<UserConfig> {
   const result = await chrome.storage.local.get(STORAGE_KEY)
-  return result[STORAGE_KEY] ?? DEFAULT_CONFIG
+  return { ...DEFAULT_CONFIG, ...result[STORAGE_KEY] }
 }
 
 export async function setConfig(config: UserConfig): Promise<void> {

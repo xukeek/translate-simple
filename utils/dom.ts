@@ -4,6 +4,7 @@ const BLOCK_TAGS = new Set([
   'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
   'li', 'td', 'th', 'blockquote', 'section', 'article',
   'figcaption', 'dd', 'dt', 'caption',
+  'header', 'footer', 'main', 'aside', 'nav',
 ])
 
 const IGNORE_TAGS = new Set([
@@ -28,7 +29,7 @@ function findBlockParent(node: Node): Node | null {
     if (IGNORE_TAGS.has(tag)) return null
     if (el.classList.contains('ts-translation') || el.classList.contains('ts-horizontal-wrapper')) return null
 
-    if (BLOCK_TAGS.has(tag) && el.children.length > 0) {
+    if (BLOCK_TAGS.has(tag) && (el.children.length > 0 || (el.textContent?.trim().length ?? 0) > 0)) {
       return current
     }
     if (tag === 'a' || tag === 'button' || tag === 'label') {
@@ -41,17 +42,18 @@ function findBlockParent(node: Node): Node | null {
 
 function isVisible(el: Element): boolean {
   const style = window.getComputedStyle(el)
-  return (
-    style.display !== 'none' &&
-    style.visibility !== 'hidden' &&
-    style.opacity !== '0' &&
-    el.getBoundingClientRect().height > 0
-  )
+  if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false
+  if (el.tagName === 'SPAN' && style.overflow === 'hidden' && parseFloat(style.width) <= 1 && parseFloat(style.height) <= 1) return false
+
+  const rect = el.getBoundingClientRect()
+  if (rect.height === 0 || rect.width === 0) return false
+  if (rect.width <= 1 && rect.height <= 1) return false
+  return true
 }
 
 function shouldTranslate(text: string): boolean {
   const t = text.trim()
-  if (t.length < 10 || t.length > 5000) return false
+  if (t.length < 4 || t.length > 5000) return false
 
   const chineseChars = (t.match(/[\u4e00-\u9fff]/g) || []).length
   const totalChars = t.replace(/\s/g, '').length
@@ -78,6 +80,7 @@ export function collectTextBlocks(root: Document | Element): TextBlock[] {
     const parent = findBlockParent(node)
     if (!parent) continue
     if (!isVisible(parent as Element)) continue
+    if (node.parentElement && !isVisible(node.parentElement)) continue
 
     const text = node.textContent?.trim()
     if (!text) continue
@@ -113,7 +116,16 @@ export function renderTranslation(
     const transEl = document.createElement('div')
     transEl.className = 'ts-translation ts-vertical'
     transEl.textContent = translation
-    parent.appendChild(transEl)
+
+    const textNodes = [...parent.childNodes].filter(
+      (n) => n.nodeType === Node.TEXT_NODE && n.textContent?.trim()
+    )
+    const lastTextNode = textNodes[textNodes.length - 1]
+    if (lastTextNode) {
+      parent.insertBefore(transEl, lastTextNode.nextSibling)
+    } else {
+      parent.appendChild(transEl)
+    }
   } else {
     const wrapper = document.createElement('div')
     wrapper.className = 'ts-horizontal-wrapper'
@@ -154,6 +166,9 @@ export function injectStyles(): void {
       line-height: 1.6;
       padding: 2px 0;
       color: #666;
+      word-break: break-word;
+      overflow-wrap: break-word;
+      max-width: 100%;
     }
     .ts-translation.ts-vertical {
       display: block;
@@ -161,6 +176,7 @@ export function injectStyles(): void {
     .ts-horizontal-wrapper {
       display: flex !important;
       gap: 12px;
+      box-sizing: border-box;
     }
     .ts-horizontal-wrapper > * {
       flex: 1;
