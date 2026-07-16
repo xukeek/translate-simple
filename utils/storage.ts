@@ -8,6 +8,8 @@ export const DEFAULT_CONFIG: UserConfig = {
   targetLang: 'zh-CN',
   displayMode: 'vertical',
   siteList: [],
+  siteRules: {},
+  ruleGenProvider: 'auto',
   engines: {
     google: {},
     siliconflow: {

@@ -1,7 +1,9 @@
 import { defineContentScript } from 'wxt/utils/define-content-script'
 import { getConfig } from '../utils/storage'
-import { collectTextBlocks, renderTranslation, removeTranslations, injectStyles } from '../utils/dom'
-import type { DisplayMode } from '../utils/translate/types'
+import { collectTextBlocks, renderTranslation, removeTranslations, injectStyles, markUnprocessed } from '../utils/dom'
+import { extractPageOutline } from '../utils/outline'
+import { previewRule, clearPreview } from '../utils/preview'
+import type { DisplayMode, SiteRule } from '../utils/translate/types'
 
 export default defineContentScript({
   matches: ['<all_urls>'],
@@ -12,10 +14,12 @@ export default defineContentScript({
 
 let isTranslating = false
 let displayMode: DisplayMode = 'vertical'
+let siteRule: SiteRule | null = null
 let observer: MutationObserver | null = null
 let translateInProgress = false
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 let pendingMutations = false
+let historyPatched = false
 
 function start(): void {
   chrome.storage.onChanged.addListener((changes) => {
@@ -44,12 +48,21 @@ function start(): void {
     } else if (message.type === 'removeTranslations') {
       stopTranslation()
       sendResponse({ ok: true })
+    } else if (message.type === 'getPageOutline') {
+      sendResponse({ outline: extractPageOutline(), title: document.title, hostname: location.hostname })
+    } else if (message.type === 'previewRule') {
+      const counts = previewRule(message.data?.includes ?? [], message.data?.excludes ?? [])
+      sendResponse({ counts })
+    } else if (message.type === 'clearPreview') {
+      clearPreview()
+      sendResponse({ ok: true })
     }
   })
 
   getConfig().then((config) => {
     displayMode = config.displayMode
     const hostname = location.hostname
+    siteRule = config.siteRules[hostname] ?? null
     if (config.siteList.includes(hostname)) {
       startTranslation()
     }
@@ -82,26 +95,37 @@ async function translateText(text: string): Promise<string> {
   })
 }
 
+/** 收集未翻译的单元并增量翻译(已翻译的单元会被 collectTextBlocks 跳过) */
+async function runTranslate(): Promise<void> {
+  injectStyles()
+  const blocks = collectTextBlocks(document, siteRule)
+  const CONCURRENCY = 6
+  for (let i = 0; i < blocks.length; i += CONCURRENCY) {
+    const batch = blocks.slice(i, i + CONCURRENCY)
+    await Promise.allSettled(
+      batch.map(async (block) => {
+        try {
+          const translated = await translateText(block.text)
+          renderTranslation(block, translated, displayMode)
+        } catch (err) {
+          markUnprocessed(block)
+          throw err
+        }
+      })
+    )
+  }
+}
+
 async function translatePage(): Promise<void> {
   if (translateInProgress) return
   translateInProgress = true
   pendingMutations = false
 
   try {
-    const blocks = collectTextBlocks(document)
-    const CONCURRENCY = 6
-    for (let i = 0; i < blocks.length; i += CONCURRENCY) {
-      const batch = blocks.slice(i, i + CONCURRENCY)
-      await Promise.allSettled(
-        batch.map(async (block) => {
-          const translated = await translateText(block.text)
-          renderTranslation(block, translated, displayMode)
-        })
-      )
-    }
+    await runTranslate()
   } finally {
     translateInProgress = false
-    if (pendingMutations) translatePage()
+    if (pendingMutations && isTranslating) translatePage()
   }
 }
 
@@ -110,21 +134,32 @@ async function translateOnce(): Promise<void> {
   translateInProgress = true
 
   try {
-    injectStyles()
-    const blocks = collectTextBlocks(document)
-    const CONCURRENCY = 6
-    for (let i = 0; i < blocks.length; i += CONCURRENCY) {
-      const batch = blocks.slice(i, i + CONCURRENCY)
-      await Promise.allSettled(
-        batch.map(async (block) => {
-          const translated = await translateText(block.text)
-          renderTranslation(block, translated, displayMode)
-        })
-      )
-    }
+    await runTranslate()
   } finally {
     translateInProgress = false
   }
+}
+
+function isOwnNode(node: Node): boolean {
+  if (node.nodeType !== Node.ELEMENT_NODE) return false
+  const el = node as Element
+  return (
+    el.classList.contains('ts-translation') ||
+    el.classList.contains('ts-horizontal-wrapper') ||
+    el.id === 'ts-style'
+  )
+}
+
+function isRelevantMutation(mutation: MutationRecord): boolean {
+  const target = mutation.target
+  if (target.nodeType === Node.ELEMENT_NODE) {
+    const el = target as Element
+    if (el.closest('.ts-translation, .ts-horizontal-wrapper')) return false
+  }
+  for (const node of mutation.addedNodes) {
+    if (!isOwnNode(node)) return true
+  }
+  return false
 }
 
 function startTranslation(): void {
@@ -135,18 +170,22 @@ function startTranslation(): void {
   translatePage()
 
   window.addEventListener('popstate', onSPANavigate)
-  const origPushState = history.pushState
-  history.pushState = function (...args) {
-    origPushState.apply(this, args)
-    setTimeout(() => onSPANavigate(), 500)
-  }
-  const origReplaceState = history.replaceState
-  history.replaceState = function (...args) {
-    origReplaceState.apply(this, args)
-    setTimeout(() => onSPANavigate(), 500)
+  if (!historyPatched) {
+    historyPatched = true
+    const origPushState = history.pushState
+    history.pushState = function (...args) {
+      origPushState.apply(this, args)
+      setTimeout(() => onSPANavigate(), 500)
+    }
+    const origReplaceState = history.replaceState
+    history.replaceState = function (...args) {
+      origReplaceState.apply(this, args)
+      setTimeout(() => onSPANavigate(), 500)
+    }
   }
 
-  observer = new MutationObserver(() => {
+  observer = new MutationObserver((mutations) => {
+    if (!mutations.some(isRelevantMutation)) return
     if (translateInProgress) {
       pendingMutations = true
       return
@@ -186,6 +225,10 @@ async function onConfigChange(): Promise<void> {
   displayMode = config.displayMode
 
   const hostname = location.hostname
+  const newRule = config.siteRules[hostname] ?? null
+  const ruleChanged = JSON.stringify(newRule) !== JSON.stringify(siteRule)
+  siteRule = newRule
+
   const shouldTranslate = config.siteList.includes(hostname)
 
   if (shouldTranslate && !isTranslating) {
@@ -195,5 +238,9 @@ async function onConfigChange(): Promise<void> {
   } else if (shouldTranslate && isTranslating) {
     stopTranslation()
     startTranslation()
+  } else if (ruleChanged && document.querySelector('.ts-translation')) {
+    // 手动翻译过的页面:规则变化时按新规则重新翻译
+    removeTranslations(document)
+    translateOnce()
   }
 }

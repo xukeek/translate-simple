@@ -14,7 +14,7 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Button } from '@/components/ui/button'
-import { Languages, Globe, Zap, Check } from 'lucide-react'
+import { Languages, Globe, Zap, Check, Sparkles } from 'lucide-react'
 
 const ENGINES: { id: EngineId; name: string }[] = [
   { id: 'google', name: 'Google 翻译（免费）' },
@@ -109,6 +109,14 @@ export default function App() {
     chrome.runtime.openOptionsPage()
   }
 
+  async function openSidePanel() {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    if (tab?.id) {
+      await chrome.sidePanel.open({ tabId: tab.id })
+      window.close()
+    }
+  }
+
   return (
     <div className="w-[400px] p-4 bg-background">
       <Card>
@@ -126,6 +134,15 @@ export default function App() {
           >
             {pageTranslated ? <Check className="h-4 w-4" /> : <Zap className="h-4 w-4" />}
             {pageTranslated ? '已翻译' : '翻译此页'}
+          </Button>
+
+          <Button
+            variant="outline"
+            className="w-full justify-start gap-2"
+            onClick={openSidePanel}
+          >
+            <Sparkles className="h-4 w-4" />
+            AI 规则：选择翻译区域
           </Button>
 
           <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">

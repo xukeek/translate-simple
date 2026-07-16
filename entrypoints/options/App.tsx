@@ -14,11 +14,13 @@ import {
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Languages, Settings2, Cpu, LoaderCircle, Check, X } from 'lucide-react'
+import { Languages, Settings2, Cpu, LoaderCircle, Check, X, ScanSearch } from 'lucide-react'
+import SiteRules from './SiteRules'
 
 const TABS = [
   { id: 'general', label: '通用', icon: Settings2 },
   { id: 'engines', label: '引擎配置', icon: Cpu },
+  { id: 'siteRules', label: '站点规则', icon: ScanSearch },
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
@@ -314,10 +316,14 @@ export default function App() {
               </Card>
             )}
 
-            <Button onClick={handleSave} disabled={saving}>
-              {saving && <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />}
-              {saving ? '保存中...' : '保存'}
-            </Button>
+            {tab === 'siteRules' && <SiteRules />}
+
+            {tab !== 'siteRules' && (
+              <Button onClick={handleSave} disabled={saving}>
+                {saving && <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />}
+                {saving ? '保存中...' : '保存'}
+              </Button>
+            )}
           </div>
         </div>
       </div>

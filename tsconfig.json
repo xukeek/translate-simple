@@ -11,7 +11,7 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "types": ["wxt/client"],
+    "types": ["wxt/client", "dom-chromium-ai"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["./*"]
