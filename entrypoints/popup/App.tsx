@@ -2,8 +2,6 @@ import { useState, useEffect } from 'react'
 import { getConfig, updateConfig } from '../../utils/storage'
 import type { EngineId, DisplayMode } from '../../utils/translate/types'
 
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -12,9 +10,9 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Button } from '@/components/ui/button'
-import { Languages, Globe, Zap, Check, Sparkles } from 'lucide-react'
+import { Languages, Globe, Zap, Check, Sparkles, Settings2, ChevronRight } from 'lucide-react'
+import { cn } from 'lib/utils'
 
 const ENGINES: { id: EngineId; name: string }[] = [
   { id: 'google', name: 'Google 翻译（免费）' },
@@ -118,53 +116,75 @@ export default function App() {
   }
 
   return (
-    <div className="w-[400px] p-4 bg-background">
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-          <div className="flex items-center gap-2">
-            <Languages className="h-5 w-5 text-primary" />
-            <CardTitle className="text-lg">简单翻译</CardTitle>
+    <div className="w-[320px] bg-[hsl(220,25%,96.5%)] text-foreground">
+      {/* 头部 */}
+      <header className="flex items-center justify-between px-4 pb-2.5 pt-3.5">
+        <div className="flex items-center gap-2">
+          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-primary to-primary/75 shadow-sm">
+            <Languages className="h-4 w-4 text-primary-foreground" />
           </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <Button
-            variant={pageTranslated ? 'default' : 'outline'}
-            className="w-full justify-start gap-2"
-            onClick={handleTranslateOnce}
-          >
-            {pageTranslated ? <Check className="h-4 w-4" /> : <Zap className="h-4 w-4" />}
-            {pageTranslated ? '已翻译' : '翻译此页'}
-          </Button>
+          <h1 className="text-sm font-semibold tracking-tight">简单翻译</h1>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+          onClick={openOptions}
+          title="更多设置"
+        >
+          <Settings2 className="!size-[15px]" />
+        </Button>
+      </header>
 
-          <Button
-            variant="outline"
-            className="w-full justify-start gap-2"
+      <div className="space-y-2.5 px-3 pb-3">
+        {/* 主操作 */}
+        <Button
+          className={cn(
+            'h-10 w-full rounded-[10px] bg-gradient-to-b from-primary to-primary/85 text-sm font-medium shadow-md shadow-primary/20',
+            pageTranslated &&
+              'bg-none bg-primary/10 text-primary shadow-none hover:bg-primary/15'
+          )}
+          onClick={handleTranslateOnce}
+        >
+          {pageTranslated ? <Check /> : <Zap />}
+          {pageTranslated ? '已翻译 · 点击还原' : '翻译此页'}
+        </Button>
+
+        {/* 页面操作分组 */}
+        <div className="divide-y overflow-hidden rounded-[10px] border bg-card shadow-sm">
+          <button
+            className="flex h-10 w-full items-center gap-2.5 px-3 text-left transition-colors hover:bg-muted/50 active:bg-muted"
             onClick={openSidePanel}
           >
-            <Sparkles className="h-4 w-4" />
-            AI 规则：选择翻译区域
-          </Button>
-
-          <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">
-            <div className="flex items-center gap-2">
-              <Globe className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm">
-                总是翻译此网站
+            <Sparkles className="h-4 w-4 shrink-0 text-primary" />
+            <span className="flex-1 text-[13px]">AI 规则：选择翻译区域</span>
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+          </button>
+          <div className="flex min-h-10 items-center justify-between gap-3 px-3 py-1.5">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <div className="min-w-0">
+                <div className="text-[13px] leading-snug">总是翻译此网站</div>
                 {hostname && (
-                  <span className="ml-1 text-xs text-muted-foreground">({hostname})</span>
+                  <div className="truncate text-[11px] leading-snug text-muted-foreground">
+                    {hostname}
+                  </div>
                 )}
-              </span>
+              </div>
             </div>
             <Switch checked={siteListed} onCheckedChange={handleSiteListChange} />
           </div>
+        </div>
 
-          <div className="space-y-2 pt-1">
-            <Label htmlFor="engine">翻译引擎</Label>
+        {/* 翻译设置分组 */}
+        <div className="divide-y overflow-hidden rounded-[10px] border bg-card shadow-sm">
+          <div className="flex h-10 items-center justify-between gap-3 pl-3 pr-1.5">
+            <span className="shrink-0 text-[13px]">翻译引擎</span>
             <Select value={engine} onValueChange={handleEngineChange}>
-              <SelectTrigger id="engine">
+              <SelectTrigger className="h-7 w-auto justify-end gap-1 border-0 bg-transparent px-1.5 text-[13px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus:ring-0 focus:ring-offset-0">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent align="end">
                 {ENGINES.map((e) => (
                   <SelectItem key={e.id} value={e.id}>
                     {e.name}
@@ -173,13 +193,14 @@ export default function App() {
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="targetLang">目标语言</Label>
+
+          <div className="flex h-10 items-center justify-between gap-3 pl-3 pr-1.5">
+            <span className="shrink-0 text-[13px]">目标语言</span>
             <Select value={targetLang} onValueChange={handleTargetLangChange}>
-              <SelectTrigger id="targetLang">
+              <SelectTrigger className="h-7 w-auto justify-end gap-1 border-0 bg-transparent px-1.5 text-[13px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus:ring-0 focus:ring-offset-0">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent align="end">
                 {LANGUAGES.map((l) => (
                   <SelectItem key={l.value} value={l.value}>
                     {l.label}
@@ -188,33 +209,33 @@ export default function App() {
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-2">
-            <Label>对照样式</Label>
-            <RadioGroup
-              value={displayMode}
-              onValueChange={handleDisplayModeChange}
-              className="flex gap-4"
-            >
-              <div className="flex items-center gap-2">
-                <RadioGroupItem value="vertical" id="vertical" />
-                <Label htmlFor="vertical">纵向</Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <RadioGroupItem value="horizontal" id="horizontal" />
-                <Label htmlFor="horizontal">横向并排</Label>
-              </div>
-            </RadioGroup>
+
+          <div className="flex h-10 items-center justify-between gap-3 pl-3 pr-1.5">
+            <span className="shrink-0 text-[13px]">对照样式</span>
+            <div className="flex rounded-md bg-muted p-0.5">
+              {(
+                [
+                  { value: 'vertical', label: '纵向' },
+                  { value: 'horizontal', label: '横向并排' },
+                ] as const
+              ).map((m) => (
+                <button
+                  key={m.value}
+                  className={cn(
+                    'h-6 rounded-[5px] px-2.5 text-xs font-medium transition-all active:scale-[0.97]',
+                    displayMode === m.value
+                      ? 'bg-background text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
+                  )}
+                  onClick={() => handleDisplayModeChange(m.value)}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full"
-            onClick={openOptions}
-          >
-            更多设置
-          </Button>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   )
 }
