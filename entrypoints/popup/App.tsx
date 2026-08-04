@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getConfig, updateConfig } from '../../utils/storage'
-import type { EngineId, DisplayMode } from '../../utils/translate/types'
+import type { EngineId } from '../../utils/translate/types'
 
 import {
   Select,
@@ -13,6 +13,9 @@ import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
 import { Languages, Globe, Zap, Check, Sparkles, Settings2, ChevronRight } from 'lucide-react'
 import { cn } from 'lib/utils'
+
+type PageState = 'idle' | 'translating' | 'translated'
+type TranslationStateResponse = { translated?: boolean; translating?: boolean }
 
 const ENGINES: { id: EngineId; name: string }[] = [
   { id: 'google', name: 'Google 翻译（免费）' },
@@ -35,30 +38,68 @@ const LANGUAGES = [
 export default function App() {
   const [hostname, setHostname] = useState('')
   const [siteListed, setSiteListed] = useState(false)
-  const [pageTranslated, setPageTranslated] = useState(false)
+  const [pageState, setPageState] = useState<PageState>('idle')
   const [engine, setEngine] = useState<EngineId>('google')
   const [targetLang, setTargetLang] = useState('zh-CN')
-  const [displayMode, setDisplayMode] = useState<DisplayMode>('vertical')
 
   useEffect(() => {
+    let cancelled = false
+    let pollTimer: ReturnType<typeof setTimeout> | null = null
+    let pollDeadline = 0
+
+    function stateFromResponse(res?: TranslationStateResponse): PageState {
+      if (res?.translated) return 'translated'
+      if (res?.translating) return 'translating'
+      return 'idle'
+    }
+
+    function stopPolling() {
+      if (pollTimer) {
+        clearTimeout(pollTimer)
+        pollTimer = null
+      }
+    }
+
+    function syncPageState(tabId?: number) {
+      if (!tabId || cancelled) return
+      chrome.tabs.sendMessage(tabId, { type: 'getTranslationState' }, (res?: TranslationStateResponse) => {
+        if (cancelled) return
+        if (chrome.runtime.lastError) {
+          setPageState('idle')
+          stopPolling()
+          return
+        }
+        const nextState = stateFromResponse(res)
+        setPageState(nextState)
+        if (nextState === 'translating' && Date.now() < pollDeadline) {
+          pollTimer = setTimeout(() => syncPageState(tabId), 300)
+        } else {
+          stopPolling()
+        }
+      })
+    }
+
     Promise.all([
       chrome.tabs.query({ active: true, currentWindow: true }),
       getConfig(),
     ]).then(([tabs, config]) => {
+      if (cancelled) return
       const tab = tabs[0]
       const h = tab?.url ? new URL(tab.url).hostname : ''
       setHostname(h)
       setSiteListed(config.siteList.includes(h))
       setEngine(config.engine)
       setTargetLang(config.targetLang)
-      setDisplayMode(config.displayMode)
 
       if (tab?.id) {
-        chrome.tabs.sendMessage(tab.id, { type: 'getTranslationState' }, (res) => {
-          if (res?.translated) setPageTranslated(true)
-        })
+        pollDeadline = Date.now() + 5000
+        syncPageState(tab.id)
       }
     })
+    return () => {
+      cancelled = true
+      stopPolling()
+    }
   }, [])
 
   function notifyTab(type: string) {
@@ -79,17 +120,12 @@ export default function App() {
     await updateConfig({ targetLang: v })
   }
 
-  async function handleDisplayModeChange(v: string) {
-    setDisplayMode(v as DisplayMode)
-    await updateConfig({ displayMode: v as DisplayMode })
-  }
-
   async function handleTranslateOnce() {
-    if (pageTranslated) {
+    if (pageState === 'translated') {
       notifyTab('removeTranslations')
-      setPageTranslated(false)
-    } else {
-      setPageTranslated(true)
+      setPageState('idle')
+    } else if (pageState === 'idle') {
+      setPageState('translating')
       notifyTab('translateOnce')
     }
   }
@@ -141,13 +177,18 @@ export default function App() {
         <Button
           className={cn(
             'h-10 w-full rounded-[10px] bg-gradient-to-b from-primary to-primary/85 text-sm font-medium shadow-md shadow-primary/20',
-            pageTranslated &&
+            pageState !== 'idle' &&
               'bg-none bg-primary/10 text-primary shadow-none hover:bg-primary/15'
           )}
           onClick={handleTranslateOnce}
+          disabled={pageState === 'translating'}
         >
-          {pageTranslated ? <Check /> : <Zap />}
-          {pageTranslated ? '已翻译 · 点击还原' : '翻译此页'}
+          {pageState === 'translated' ? <Check /> : <Zap />}
+          {pageState === 'translated'
+            ? '已翻译 · 点击还原'
+            : pageState === 'translating'
+              ? '翻译中...'
+              : '翻译此页'}
         </Button>
 
         {/* 页面操作分组 */}
@@ -208,31 +249,6 @@ export default function App() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
-
-          <div className="flex h-10 items-center justify-between gap-3 pl-3 pr-1.5">
-            <span className="shrink-0 text-[13px]">对照样式</span>
-            <div className="flex rounded-md bg-muted p-0.5">
-              {(
-                [
-                  { value: 'vertical', label: '纵向' },
-                  { value: 'horizontal', label: '横向并排' },
-                ] as const
-              ).map((m) => (
-                <button
-                  key={m.value}
-                  className={cn(
-                    'h-6 rounded-[5px] px-2.5 text-xs font-medium transition-all active:scale-[0.97]',
-                    displayMode === m.value
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                  onClick={() => handleDisplayModeChange(m.value)}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
           </div>
         </div>
       </div>

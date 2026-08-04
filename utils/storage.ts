@@ -6,7 +6,6 @@ export const DEFAULT_CONFIG: UserConfig = {
   enabled: false,
   engine: 'google',
   targetLang: 'zh-CN',
-  displayMode: 'vertical',
   siteList: [],
   siteRules: {},
   ruleGenProvider: 'auto',

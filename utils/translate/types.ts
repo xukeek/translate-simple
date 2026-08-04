@@ -1,7 +1,5 @@
 export type EngineId = 'google' | 'siliconflow' | 'zhipu'
 
-export type DisplayMode = 'vertical' | 'horizontal'
-
 export interface EngineConfig {
   apiKey?: string
   model?: string
@@ -27,7 +25,6 @@ export interface UserConfig {
   enabled: boolean
   engine: EngineId
   targetLang: string
-  displayMode: DisplayMode
   siteList: string[]
   /** key 为 hostname */
   siteRules: Record<string, SiteRule>

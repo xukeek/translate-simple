@@ -7,6 +7,8 @@ export default defineConfig({
   manifest: {
     name: '简单翻译',
     permissions: ['storage'],
+    // Dev debug log sink (scripts/debug-log-server.mjs); unused in production builds
+    host_permissions: ['http://127.0.0.1:8787/*'],
     action: {
       default_popup: 'entrypoints/popup/index.html',
     },

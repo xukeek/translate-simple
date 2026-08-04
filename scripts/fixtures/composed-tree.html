@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Composed Tree collect fixture</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 16px; }
+    .row { display: flex; flex-direction: row; gap: 8px; }
+    .col { display: flex; flex-direction: column; gap: 8px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .contents-wrap { display: contents; }
+    .inline-shell { display: inline; }
+    .card { display: block; border: 1px solid #ccc; padding: 8px; margin: 8px 0; }
+    h2 { margin: 12px 0 4px; font-size: 16px; }
+  </style>
+</head>
+<body>
+  <main id="root">
+    <h2>block-inline</h2>
+    <section id="block-inline" class="card">
+      <p id="p1">Hello paragraph one.</p>
+      <p id="p2">Hello paragraph two.</p>
+    </section>
+
+    <h2>inline-shell-with-blocks</h2>
+    <section id="inline-shell" class="card">
+      <span class="inline-shell" id="shell">
+        <div class="card" id="shell-a">Shell child A title</div>
+        <div class="card" id="shell-b">Shell child B title</div>
+      </span>
+    </section>
+
+    <h2>flex-row</h2>
+    <section id="flex-row" class="row card">
+      <span>Alpha</span>
+      <span>Beta</span>
+      <span>Gamma</span>
+    </section>
+
+    <h2>flex-col</h2>
+    <section id="flex-col" class="col card">
+      <div>Column item one text</div>
+      <div>Column item two text</div>
+      <div>Column item three text</div>
+    </section>
+
+    <h2>grid</h2>
+    <section id="grid" class="grid card">
+      <div>Grid cell north west</div>
+      <div>Grid cell north east</div>
+      <div>Grid cell south west</div>
+      <div>Grid cell south east</div>
+    </section>
+
+    <h2>display-contents</h2>
+    <section id="contents" class="card">
+      <div class="contents-wrap">
+        <p>Contents child first paragraph</p>
+        <p>Contents child second paragraph</p>
+      </div>
+    </section>
+
+    <h2>open-shadow-slots</h2>
+    <div id="shadow-host-mount"></div>
+  </main>
+
+  <script>
+    class DemoCard extends HTMLElement {
+      connectedCallback() {
+        if (this.shadowRoot) return
+        const root = this.attachShadow({ mode: 'open' })
+        root.innerHTML = `
+          <style>
+            :host { display: block; border: 1px dashed #888; padding: 8px; margin: 6px 0; }
+            .title { display: block; font-weight: 700; }
+            .meta { display: block; opacity: 0.7; font-size: 12px; }
+            .chrome { display: none; }
+          </style>
+          <div class="chrome">internal chrome should not dominate</div>
+          <slot name="title" class="title"></slot>
+          <slot name="meta" class="meta"></slot>
+          <slot></slot>
+        `
+      }
+    }
+    customElements.define('demo-card', DemoCard)
+
+    const mount = document.getElementById('shadow-host-mount')
+    const titles = [
+      'First slotted card title here',
+      'Second slotted card title here',
+      'Third slotted card title here',
+    ]
+    for (const title of titles) {
+      const card = document.createElement('demo-card')
+      const t = document.createElement('a')
+      t.slot = 'title'
+      t.href = '#'
+      t.textContent = title
+      card.appendChild(t)
+      const m = document.createElement('span')
+      m.slot = 'meta'
+      m.textContent = 'meta label example'
+      card.appendChild(m)
+      mount.appendChild(card)
+    }
+
+    // Nested slot host
+    class NestedHost extends HTMLElement {
+      connectedCallback() {
+        if (this.shadowRoot) return
+        const root = this.attachShadow({ mode: 'open' })
+        root.innerHTML = `<div style="display:block"><slot name="body"></slot></div>`
+      }
+    }
+    customElements.define('nested-host', NestedHost)
+    const nested = document.createElement('nested-host')
+    const body = document.createElement('p')
+    body.slot = 'body'
+    body.textContent = 'Nested slot body paragraph text'
+    nested.appendChild(body)
+    mount.appendChild(nested)
+
+    window.__fixtureReady = true
+  </script>
+</body>
+</html>

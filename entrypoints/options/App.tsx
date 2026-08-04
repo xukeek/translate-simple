@@ -1,6 +1,6 @@
 import { useState, useEffect, type ReactNode } from 'react'
 import { getConfig, setConfig, DEFAULT_CONFIG } from '../../utils/storage'
-import type { EngineId, DisplayMode } from '../../utils/translate/types'
+import type { EngineId } from '../../utils/translate/types'
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -96,7 +96,6 @@ export default function App() {
   const [tab, setTab] = useState<TabId>('general')
   const [engine, setEngine] = useState<EngineId>('google')
   const [targetLang, setTargetLang] = useState('zh-CN')
-  const [displayMode, setDisplayMode] = useState<DisplayMode>('vertical')
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({})
   const [models, setModels] = useState<Record<string, string>>({})
   const [baseURLs, setBaseURLs] = useState<Record<string, string>>({})
@@ -108,7 +107,6 @@ export default function App() {
     getConfig().then((config) => {
       setEngine(config.engine)
       setTargetLang(config.targetLang)
-      setDisplayMode(config.displayMode)
       const keys: Record<string, string> = {}
       const mods: Record<string, string> = {}
       const urls: Record<string, string> = {}
@@ -147,7 +145,6 @@ export default function App() {
         ...config,
         engine,
         targetLang,
-        displayMode,
         engines,
       })
       setSavedFlash(true)
@@ -231,29 +228,6 @@ export default function App() {
                         ))}
                       </SelectContent>
                     </Select>
-                  </SettingRow>
-                  <SettingRow label="对照样式" desc="译文与原文的排列方式">
-                    <div className="flex shrink-0 rounded-md bg-muted p-0.5">
-                      {(
-                        [
-                          { value: 'vertical', label: '纵向' },
-                          { value: 'horizontal', label: '横向并排' },
-                        ] as const
-                      ).map((m) => (
-                        <button
-                          key={m.value}
-                          className={cn(
-                            'h-7 rounded-[5px] px-3 text-[13px] font-medium transition-all active:scale-[0.97]',
-                            displayMode === m.value
-                              ? 'bg-background text-foreground shadow-sm'
-                              : 'text-muted-foreground hover:text-foreground'
-                          )}
-                          onClick={() => setDisplayMode(m.value)}
-                        >
-                          {m.label}
-                        </button>
-                      ))}
-                    </div>
                   </SettingRow>
                 </CardContent>
               </Card>

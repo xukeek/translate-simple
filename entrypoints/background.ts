@@ -1,7 +1,7 @@
 import { defineBackground } from 'wxt/utils/define-background'
 import { translate } from '../utils/translate'
 import { TranslationCache } from '../utils/cache'
-import { getConfig, updateConfig } from '../utils/storage'
+import { forwardDebugLogs } from '../utils/debugLog'
 import type { TranslateRequest } from '../utils/translate/types'
 
 export default defineBackground({
@@ -9,6 +9,20 @@ export default defineBackground({
     const cache = new TranslationCache()
 
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (message.type === 'debugLog') {
+        if (import.meta.env.DEV) {
+          const lines = Array.isArray(message.lines)
+            ? message.lines.map(String)
+            : message.line != null
+              ? [String(message.line)]
+              : []
+          forwardDebugLogs(lines).finally(() => sendResponse({ ok: true }))
+          return true
+        }
+        sendResponse({ ok: false })
+        return
+      }
+
       if (message.type === 'translate') {
         const req: TranslateRequest = message.data
 
