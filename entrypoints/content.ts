@@ -1,6 +1,6 @@
 import { defineContentScript } from 'wxt/utils/define-content-script'
 import { getConfig, updateConfig } from '../utils/storage'
-import { collectTextBlocks, renderTranslation, removeTranslations, injectStyles, markUnprocessed, translationSourceMap, generateSelector, logShadowCensus, observeOpenShadows, observeOpenShadowsInSubtree } from '../utils/dom'
+import { collectTextBlocks, renderTranslation, removeTranslations, injectStyles, markUnprocessed, translationSourceMap, generateSelector, logShadowCensus, observeOpenShadows, observeOpenShadowsInSubtree, type TextBlock } from '../utils/dom'
 import { extractPageOutline } from '../utils/outline'
 import { previewRule, clearPreview } from '../utils/preview'
 import { tsInfo } from '../utils/debugLog'
@@ -23,6 +23,15 @@ let scrollDebounceTimer: ReturnType<typeof setTimeout> | null = null
 let pendingMutations = false
 let historyPatched = false
 let scrollWatchAttached = false
+let mutationWatchAttached = false
+/** 翻译循环进行中 DOM 变化时置位,在批次边界重收集并插队 */
+let queueDirty = false
+/** 本轮 mutation 中识别出的高优先子树(抽屉/对话框等) */
+let boostRoots = new Set<Element>()
+
+const CONCURRENCY = 6
+/** 可见面积超过此阈值的新增子树视为可插队面板 */
+const BOOST_MIN_AREA = 50_000
 
 function getTranslationState(): { translated: boolean; translating: boolean } {
   return {
@@ -137,13 +146,125 @@ async function translateText(text: string): Promise<string> {
   })
 }
 
-/** 收集未翻译的单元并增量翻译(已翻译的单元会被 collectTextBlocks 跳过) */
-async function runTranslate(): Promise<void> {
-  injectStyles()
-  logShadowCensus(document)
-  const blocks = collectTextBlocks(document, siteRule)
+function scoreBlock(block: TextBlock): number {
+  const rect = block.element.getBoundingClientRect()
+  const vh = window.innerHeight
+  if (rect.bottom > 0 && rect.top < vh) {
+    return Math.max(0, rect.top)
+  }
+  if (rect.top >= vh) {
+    return 2_000_000 + rect.top
+  }
+  return 3_000_000 + Math.abs(rect.bottom)
+}
+
+function sortBlocksByViewport(blocks: TextBlock[]): TextBlock[] {
+  return [...blocks].sort((a, b) => scoreBlock(a) - scoreBlock(b))
+}
+
+function isElementVisible(el: Element): boolean {
+  const rect = el.getBoundingClientRect()
+  if (rect.width === 0 || rect.height === 0) return false
+  const style = getComputedStyle(el)
+  if (style.visibility === 'hidden' || style.display === 'none') return false
+  if (parseFloat(style.opacity) === 0) return false
+  return rect.bottom > 0 && rect.top < window.innerHeight
+}
+
+function getVisibleArea(el: Element): number {
+  const rect = el.getBoundingClientRect()
+  const vh = window.innerHeight
+  const vw = window.innerWidth
+  const top = Math.max(0, rect.top)
+  const bottom = Math.min(vh, rect.bottom)
+  const left = Math.max(0, rect.left)
+  const right = Math.min(vw, rect.right)
+  if (bottom <= top || right <= left) return 0
+  return (bottom - top) * (right - left)
+}
+
+function isBoostCandidate(el: Element): boolean {
+  const role = el.getAttribute('role')
+  if (role === 'dialog' || role === 'alertdialog') return true
+  const style = getComputedStyle(el)
+  if (style.position === 'fixed' || style.position === 'absolute') {
+    const rect = el.getBoundingClientRect()
+    if (rect.width > window.innerWidth * 0.3 && rect.height > window.innerHeight * 0.3) {
+      return true
+    }
+  }
+  return false
+}
+
+function findVisibleBoostRoot(el: Element): Element | null {
+  let best: Element | null = null
+  let current: Element | null = el
+  while (current && current !== document.body) {
+    if (isBoostCandidate(current) && isElementVisible(current)) {
+      best = current
+    }
+    current = current.parentElement
+  }
+  if (best) return best
+  if (isElementVisible(el) && getVisibleArea(el) >= BOOST_MIN_AREA) {
+    return el
+  }
+  return null
+}
+
+function isBlockInBoostSubtree(block: TextBlock, roots: Set<Element>): boolean {
+  for (const root of roots) {
+    if (root.contains(block.element)) return true
+  }
+  return false
+}
+
+function collectBoostRootsFromMutations(mutations: MutationRecord[]): void {
+  for (const m of mutations) {
+    for (const node of m.addedNodes) {
+      if (node.nodeType !== Node.ELEMENT_NODE) continue
+      if (isOwnNode(node)) continue
+      const root = findVisibleBoostRoot(node as Element)
+      if (root) boostRoots.add(root)
+      for (const el of (node as Element).querySelectorAll?.('*') ?? []) {
+        const nested = findVisibleBoostRoot(el)
+        if (nested) boostRoots.add(nested)
+      }
+    }
+  }
+}
+
+function refreshQueue(remaining: TextBlock[], inFlight: Set<string>): TextBlock[] {
+  const fresh = collectTextBlocks(document, siteRule)
+  const result: TextBlock[] = []
+  const seen = new Set<string>()
+
+  for (const b of sortBlocksByViewport(fresh)) {
+    if (seen.has(b.id) || inFlight.has(b.id)) continue
+    if (isBlockInBoostSubtree(b, boostRoots)) {
+      result.push(b)
+      seen.add(b.id)
+    }
+  }
+
+  for (const b of remaining) {
+    if (seen.has(b.id) || inFlight.has(b.id)) continue
+    result.push(b)
+    seen.add(b.id)
+  }
+
+  for (const b of sortBlocksByViewport(fresh)) {
+    if (seen.has(b.id) || inFlight.has(b.id)) continue
+    result.push(b)
+    seen.add(b.id)
+  }
+
+  tsInfo(`[ts-queue] refresh remaining=${result.length} boostRoots=${boostRoots.size}`)
+  return result
+}
+
+function logCollectSummary(blocks: TextBlock[]): void {
   tsInfo(`[ts-collect] blocks=${blocks.length}`)
-  // 列出 top 最大的几个 block 的 top,便于对照「从哪张卡开始没有」
   const byTop = [...blocks]
     .map((b) => ({
       top: Math.round(b.element.getBoundingClientRect().top),
@@ -157,12 +278,37 @@ async function runTranslate(): Promise<void> {
   byTop.slice(-5).forEach((b, i) => {
     tsInfo(`[ts-collect] last#${i} top=${b.top} text="${b.text}"`)
   })
+}
+
+/** 收集未翻译的单元并增量翻译(已翻译的单元会被 collectTextBlocks 跳过) */
+async function runTranslate(): Promise<void> {
+  injectStyles()
+  logShadowCensus(document)
+
+  const inFlight = new Set<string>()
+  let remaining = sortBlocksByViewport(collectTextBlocks(document, siteRule))
+  logCollectSummary(remaining)
 
   let translated = 0
   let failed = 0
-  const CONCURRENCY = 6
-  for (let i = 0; i < blocks.length; i += CONCURRENCY) {
-    const batch = blocks.slice(i, i + CONCURRENCY)
+  let batchNum = 0
+
+  while (remaining.length > 0 || queueDirty) {
+    if (queueDirty) {
+      remaining = refreshQueue(remaining, inFlight)
+      queueDirty = false
+    }
+
+    const pending = remaining.filter((b) => !inFlight.has(b.id))
+    if (pending.length === 0) {
+      if (queueDirty) continue
+      break
+    }
+
+    const batch = pending.slice(0, CONCURRENCY)
+    for (const b of batch) inFlight.add(b.id)
+
+    batchNum++
     const results = await Promise.allSettled(
       batch.map(async (block) => {
         try {
@@ -174,17 +320,25 @@ async function runTranslate(): Promise<void> {
         }
       })
     )
+
+    for (const b of batch) {
+      inFlight.delete(b.id)
+      remaining = remaining.filter((r) => r.id !== b.id)
+    }
+
     for (const r of results) {
       if (r.status === 'fulfilled') translated++
       else failed++
     }
     tsInfo(
-      `[ts-collect] batch ${Math.floor(i / CONCURRENCY) + 1}` +
+      `[ts-collect] batch ${batchNum}` +
         ` ok=${results.filter((r) => r.status === 'fulfilled').length}` +
         ` fail=${results.filter((r) => r.status === 'rejected').length}` +
-        ` progress=${translated + failed}/${blocks.length}`
+        ` progress=${translated + failed} queue=${remaining.length}`
     )
   }
+
+  boostRoots.clear()
   tsInfo(`[ts-collect] done translated=${translated} failed=${failed}`)
 }
 
@@ -197,7 +351,7 @@ async function translatePage(): Promise<void> {
     await runTranslate()
   } finally {
     translateInProgress = false
-    if (pendingMutations && isTranslating) translatePage()
+    if ((pendingMutations || queueDirty) && isTranslating) translatePage()
   }
 }
 
@@ -209,9 +363,10 @@ async function translateOnce(): Promise<void> {
   try {
     await runTranslate()
     attachScrollWatch()
+    attachMutationWatch()
   } finally {
     translateInProgress = false
-    if (pendingMutations && document.querySelector('.ts-translation')) {
+    if ((pendingMutations || queueDirty) && document.querySelector('.ts-translation')) {
       translateOnce()
     }
   }
@@ -225,7 +380,7 @@ function onScrollRetranslate(): void {
     const hasTranslations = document.querySelector('.ts-translation') !== null
     if (!hasTranslations && !isTranslating) return
     if (translateInProgress) {
-      pendingMutations = true
+      queueDirty = true
       return
     }
     if (isTranslating) {
@@ -271,6 +426,65 @@ function isRelevantMutation(mutation: MutationRecord): boolean {
   return false
 }
 
+function handleDomMutations(mutations: MutationRecord[]): void {
+  if (!mutations.some(isRelevantMutation)) return
+
+  if (observer) {
+    let added = 0
+    for (const m of mutations) {
+      for (const node of m.addedNodes) {
+        added += observeOpenShadowsInSubtree(node, observer, observedShadows)
+      }
+      if (m.target.nodeType === Node.ELEMENT_NODE) {
+        added += observeOpenShadowsInSubtree(m.target, observer, observedShadows)
+      }
+    }
+    if (added > 0) tsInfo(`[ts-shadow] observe+${added}`)
+  }
+
+  collectBoostRootsFromMutations(mutations)
+  queueDirty = true
+
+  if (translateInProgress) return
+
+  if (debounceTimer) clearTimeout(debounceTimer)
+  debounceTimer = setTimeout(() => {
+    debounceTimer = null
+    if (isTranslating) {
+      translatePage()
+    } else if (document.querySelector('.ts-translation')) {
+      translateOnce()
+    }
+  }, 300)
+}
+
+function ensureMutationObserver(): MutationObserver {
+  if (observer) return observer
+  observer = new MutationObserver(handleDomMutations)
+  return observer
+}
+
+function attachMutationWatch(): void {
+  if (mutationWatchAttached) return
+  mutationWatchAttached = true
+  const obs = ensureMutationObserver()
+  obs.observe(document.body, {
+    childList: true,
+    subtree: true,
+  })
+  const initial = observeOpenShadows(document, obs, observedShadows)
+  if (initial > 0) tsInfo(`[ts-shadow] observe initial=${initial}`)
+}
+
+function detachMutationWatch(): void {
+  mutationWatchAttached = false
+  if (observer) {
+    observer.disconnect()
+    observer = null
+  }
+  observedShadows = new WeakSet()
+}
+
 function startTranslation(): void {
   if (isTranslating) return
   isTranslating = true
@@ -278,6 +492,7 @@ function startTranslation(): void {
   injectStyles()
   translatePage()
   attachScrollWatch()
+  attachMutationWatch()
 
   window.addEventListener('popstate', onSPANavigate)
   if (!historyPatched) {
@@ -293,36 +508,6 @@ function startTranslation(): void {
       setTimeout(() => onSPANavigate(), 500)
     }
   }
-
-  observer = new MutationObserver((mutations) => {
-    if (!mutations.some(isRelevantMutation)) return
-    // 仅扫描新增子树中的 open shadow,避免每次全页 querySelectorAll
-    if (observer) {
-      let added = 0
-      for (const m of mutations) {
-        for (const node of m.addedNodes) {
-          added += observeOpenShadowsInSubtree(node, observer, observedShadows)
-        }
-        // 目标节点自身也可能刚 attachShadow
-        if (m.target.nodeType === Node.ELEMENT_NODE) {
-          added += observeOpenShadowsInSubtree(m.target, observer, observedShadows)
-        }
-      }
-      if (added > 0) tsInfo(`[ts-shadow] observe+${added}`)
-    }
-    if (translateInProgress) {
-      pendingMutations = true
-      return
-    }
-    if (debounceTimer) clearTimeout(debounceTimer)
-    debounceTimer = setTimeout(() => translatePage(), 300)
-  })
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true,
-  })
-  const initial = observeOpenShadows(document, observer, observedShadows)
-  if (initial > 0) tsInfo(`[ts-shadow] observe initial=${initial}`)
 }
 
 function onSPANavigate(): void {
@@ -334,15 +519,13 @@ function onSPANavigate(): void {
 function stopTranslation(): void {
   isTranslating = false
   translateInProgress = false
+  queueDirty = false
+  boostRoots.clear()
   if (debounceTimer) {
     clearTimeout(debounceTimer)
     debounceTimer = null
   }
-  if (observer) {
-    observer.disconnect()
-    observer = null
-  }
-  observedShadows = new WeakSet()
+  detachMutationWatch()
   detachScrollWatch()
   window.removeEventListener('popstate', onSPANavigate)
   removeTranslations(document)
