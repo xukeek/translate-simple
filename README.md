@@ -24,7 +24,9 @@
 
 ### Chrome Web Store
 
-> TODO: 上架后补充链接
+[![Available in the Chrome Web Store](./assets/chrome-web-store-badge.png)](https://chromewebstore.google.com/detail/简单翻译/bjbjfghkiejlnegbkombainjfmfgfbio)
+
+或直接访问：[Chrome 网上应用店 - 简单翻译](https://chromewebstore.google.com/detail/简单翻译/bjbjfghkiejlnegbkombainjfmfgfbio)
 
 ### 开发者模式
 
